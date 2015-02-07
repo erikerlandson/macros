@@ -1,18 +1,19 @@
 ### macros
 Experiments with Scala macros
 
-##### build
+### build
 
-    # got to project directory
+    # go to project directory
     $ cd /path/to/macros
-    # or use 'xsbt compile'
     $ sbt compile
+    # or use xsbt
 
-##### run
+
+### run
 
     $ scala -cp core/target/scala-2.11/classes Test
 
 or
 
-    # or use xsbt
     $ sbt run test
+    # or use xsbt
