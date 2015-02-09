@@ -21,7 +21,15 @@ object MyBuild extends Build {
     settings = buildSettings ++ Seq(
       run <<= run in Compile in core
     )
-  ) aggregate(macros, core)
+  ) aggregate(libs, macros, core)
+
+  lazy val libs: Project = Project(
+    "libs",
+    file("libs"),
+    settings = buildSettings ++ Seq(
+      libraryDependencies += "org.scala-lang" % "scala-reflect" % scalaVersion.value
+    )
+  )
 
   lazy val macros: Project = Project(
     "macros",
@@ -29,11 +37,11 @@ object MyBuild extends Build {
     settings = buildSettings ++ Seq(
       libraryDependencies += "org.scala-lang" % "scala-reflect" % scalaVersion.value
     )
-  )
+  ) dependsOn(libs)
 
   lazy val core: Project = Project(
     "core",
     file("core"),
     settings = buildSettings
-  ) dependsOn(macros)
+  ) dependsOn(libs, macros)
 }
