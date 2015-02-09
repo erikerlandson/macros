@@ -47,7 +47,6 @@ class MacrosImpl(val c: Context) {
 }
 
 object Macros {
-  import scala.reflect.internal.Types$NoType$
   def hello: Unit = macro MacrosImpl.hello
   def throwable(s: Symbol, v: Int): Unit  = macro MacrosImpl.throwable
   def debug(x: Any): Unit = macro MacrosImpl.debug
