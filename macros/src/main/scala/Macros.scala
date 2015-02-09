@@ -2,31 +2,33 @@ import scala.language.experimental.macros
 import scala.reflect.macros.blackbox.Context
 
 class MacrosImpl(val c: Context) {
+  import c.universe._
+
   import TypeString._
 
   def hello: c.Tree = {
-    import c.universe._
     q"""println("Hello World")"""
   }
 
+  def debug(x: c.Tree): c.Tree = {
+    val q"$_.$xterm" = x
+    val xname = xterm match { case TermName(n) => n }
+    q"""println($xname + "= " + $x)"""
+  }
+
   def throwable(s: c.Tree, v: c.Tree): c.Tree = {
-    import c.universe._
-    println(s"s= $s")
-    println(s"c.ma= ${c.macroApplication}")
     val q"scala.Symbol.apply($stree)" = s
-    println(s"stree= $stree  type= ${typeString(stree)}")
     val q"${sname: String}" = stree
-    println(s"sname= $sname  type= ${typeString(sname)}")
-    val sterm = TypeName(s"${sname}BreakThrowable")
+    val stype = TypeName(s"${sname}BreakThrowable")
     q"""
       {
-        class $sterm extends scala.util.control.ControlThrowable
+        class $stype extends scala.util.control.ControlThrowable
         try {
           if ($v > 10) {
-            throw new $sterm
+            throw new $stype
           }
         } catch {
-          case bt: $sterm => {
+          case bt: $stype => {
             println("caught my type!")
           }
           case _ : Throwable => {
@@ -37,17 +39,19 @@ class MacrosImpl(val c: Context) {
     """
   }
 
-
-  def debug(x: c.Tree): c.Tree = {
-    import c.universe._
-    val q"$_.$xterm" = x
-    val xname = xterm match { case TermName(n) => n }
-    q"""println($xname + "= " + $x)"""
+  def traversal(b: c.Tree): c.Tree = {
+    val tv = new Traverser {
+    }
+    q"""
+    {}
+    """
   }
+
 }
 
 object Macros {
   def hello: Unit = macro MacrosImpl.hello
-  def throwable(s: Symbol, v: Int): Unit  = macro MacrosImpl.throwable
   def debug(x: Any): Unit = macro MacrosImpl.debug
+  def throwable(s: Symbol, v: Int): Unit  = macro MacrosImpl.throwable
+  def traversal(b: => Unit): Unit = macro MacrosImpl.traversal
 }
