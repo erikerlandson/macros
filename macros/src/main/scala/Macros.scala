@@ -41,7 +41,18 @@ class MacrosImpl(val c: Context) {
 
   def traversal(b: c.Tree): c.Tree = {
     val tv = new Traverser {
+      override def traverse(tree: Tree) {
+        tree match {
+          case q"$_.breakable($sym)" => { println(s"found breakable: $sym") }
+          case q"$_.break($sym)" => { println(s"found break: $sym") }
+          case _ => {
+            println(s"other: $tree") 
+            super.traverse(tree)
+          }
+        }
+      }
     }
+    tv.traverse(b)
     q"""
     {}
     """

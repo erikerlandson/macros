@@ -1,6 +1,13 @@
 object Demo extends App {
   import TypeString._
   val foo = 1
-  Macros.debug(foo)
-  Macros.throwable('eje, 5)
+  //Macros.debug(foo)
+  //Macros.throwable('eje, 5)
+
+  def breakable(s: Symbol) {}
+  def break(s: Symbol) {}
+  Macros.traversal({
+    breakable('foo)
+    break('bar)
+  })
 }
