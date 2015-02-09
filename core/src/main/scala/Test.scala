@@ -1,5 +1,4 @@
-object Test extends App {
-  import scala.util.control.ControlThrowable
+object Demo extends App {
   import TypeString._
   val foo = 1
   Macros.debug(foo)
