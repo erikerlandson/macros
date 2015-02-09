@@ -8,12 +8,6 @@ Experiments with Scala macros
     $ sbt compile
     # or use xsbt
 
-
 ### run
-
-    $ scala -cp core/target/scala-2.11/classes Test
-
-or
-
-    $ sbt run test
+    $ sbt 'core/run-main Demo'
     # or use xsbt
