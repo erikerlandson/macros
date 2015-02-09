@@ -8,6 +8,13 @@ object Demo extends App {
   def break(s: Symbol) {}
   Macros.traversal({
     breakable('foo)
-    break('bar)
+    break('foo)
+    object Obj1 {
+      breakable('goo)
+      break('goo)
+// macro will throw a compilation error:
+//      break('nope)
+//      breakable('foo)
+    }
   })
 }

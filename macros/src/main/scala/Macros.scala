@@ -39,20 +39,41 @@ class MacrosImpl(val c: Context) {
     """
   }
 
-  def traversal(b: c.Tree): c.Tree = {
+  def treeSymbol(s: c.Tree): scala.Symbol = {
+    val q"scala.Symbol.apply($stree)" = s
+    val q"${sname: String}" = stree
+    scala.Symbol(sname)
+  }
+
+  def breakOccurrences(tree: c.Tree): (Seq[scala.Symbol], Seq[scala.Symbol]) = {
+    var breaks = List.empty[scala.Symbol]
+    var breakables = List.empty[scala.Symbol]
     val tv = new Traverser {
-      override def traverse(tree: Tree) {
-        tree match {
-          case q"$_.breakable($sym)" => { println(s"found breakable: $sym") }
-          case q"$_.break($sym)" => { println(s"found break: $sym") }
+      override def traverse(tr: Tree) {
+        tr match {
+          case q"$_.breakable($sym)" => { breakables = treeSymbol(sym) :: breakables }
+          case q"$_.break($sym)" => { breaks = treeSymbol(sym) :: breaks }
           case _ => {
-            println(s"other: $tree") 
-            super.traverse(tree)
+            super.traverse(tr)
           }
         }
       }
     }
-    tv.traverse(b)
+    tv.traverse(tree)
+    (breakables, breaks)
+  }
+
+  def traversal(b: c.Tree): c.Tree = {
+    val (breakables, breaks) = breakOccurrences(b)
+    println(s"breakables= $breakables")
+    println(s"breaks= $breaks")
+    // is there a standard way to signal compilation failure in macros?
+    if (breakables.length != breakables.distinct.length) {
+      throw new Exception("Duplicated breakable symbol name")
+    }
+    if ((breaks.toSet -- breakables.toSet).size > 0) {
+      throw new Exception("Invoking break on undefined breakable symbol")
+    }
     q"""
     {}
     """
