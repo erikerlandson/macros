@@ -6,8 +6,18 @@ class LBGMacros(val c: Context) {
 
   import TypeString._
 
+  private def breakableBlockValid(blk: c.Tree): Boolean = {
+    // a single 'for' comprehension is valid: either a single 'map' or 'foreach' call
+    blk match {
+      case q"$_.map[$_](..$_)" => true
+      case q"$_.foreach[$_](..$_)" => true
+      case _ => false
+    }
+  }
+
   def breakableBlock(blk: c.Tree): c.Tree = {
    println(showCode(blk))
+   if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     q"""
       {}
     """
