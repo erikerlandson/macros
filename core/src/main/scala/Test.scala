@@ -4,6 +4,7 @@ object Demo extends App {
   //Macros.debug(foo)
   //Macros.throwable('eje, 5)
 
+/*
   def breakable(s: Symbol) {}
   def break(s: Symbol) {}
   Macros.traversal({
@@ -17,4 +18,15 @@ object Demo extends App {
 //      breakable('foo)
     }
   })
+*/
+
+  import LabeledBreakableGenerator._
+  breakable {
+    for {
+      j <- breakable(1 to 10, 'loop);
+      if (j > 3) break('loop)
+    } yield {
+      1 + j
+    }
+  }
 }

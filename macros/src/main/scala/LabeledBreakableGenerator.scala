@@ -1,3 +1,19 @@
+import scala.language.experimental.macros
+import scala.reflect.macros.blackbox.Context
+
+class LBGMacros(val c: Context) {
+  import c.universe._
+
+  import TypeString._
+
+  def breakableBlock(blk: c.Tree): c.Tree = {
+   println(showCode(blk))
+    q"""
+      {}
+    """
+  }
+}
+
 object LabeledBreakableGenerator {
   import scala.language.implicitConversions
 
@@ -6,6 +22,8 @@ object LabeledBreakableGenerator {
   // Generates a new breakable generator from any traversable object.
   def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] =
     new BreakableIterator(t1.toIterator)
+
+  def breakable[B](blk: => B): Unit = macro LBGMacros.breakableBlock
 
   // Mediates boolean expression with 'break' and 'continue' invocations
   case class BreakableGuardCondition(cond: Boolean) {
