@@ -10,6 +10,7 @@ class LBGMacros(val c: Context) {
     // a single 'for' comprehension is valid: either a single 'map' or 'foreach' call
     blk match {
       case q"$_.map[$_](..$_)" => true
+      case q"$_.flatMap[$_](..$_)" => true
       case q"$_.foreach[$_](..$_)" => true
       case _ => false
     }
@@ -30,14 +31,17 @@ object LabeledBreakableGenerator {
   type BreakableGenerator[+A] = BreakableIterator[A]
 
   // Generates a new breakable generator from any traversable object.
-  def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] =
+  def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] = {
+    throw new Exception("Can't invoke this directly, it's a macro placeholder")
     new BreakableIterator(t1.toIterator)
+  }
 
   def breakable[B](blk: => B): Unit = macro LBGMacros.breakableBlock
 
   // Mediates boolean expression with 'break' and 'continue' invocations
   case class BreakableGuardCondition(cond: Boolean) {
     def break(label: Symbol): Boolean = {
+      throw new Exception("Can't invoke this directly, it's a macro placeholder")
       false
     }
   }
