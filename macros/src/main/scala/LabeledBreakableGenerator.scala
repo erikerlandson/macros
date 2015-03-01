@@ -91,7 +91,7 @@ class LBGMacros(val c: Context) {
                 None
               }
             }
-          }.filter(x => !x.isEmpty).map(_.get)"""
+          }.filter(!_.isEmpty).map(_.get)"""
         } else {
           q"""$subXform.foreach { vv =>
             try {
