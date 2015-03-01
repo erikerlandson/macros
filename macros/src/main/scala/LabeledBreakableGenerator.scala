@@ -31,8 +31,11 @@ class LBGMacros(val c: Context) {
     }
   }
 
+  def lbgCT(lab: String) = TypeName(s"${lab}ThrowableLBG")
+  def lbgBG(lab: String) = TermName(s"${lab}IterLBG")
+
   def xformSubLGE(expr: c.Tree, label: String): c.Tree = {
-    val brkVar = TermName(s"${label}IterLGE")
+    val brkVar = lbgBG(label)
     expr match {
       case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
       case q"""$sub.withFilter(
@@ -46,7 +49,7 @@ class LBGMacros(val c: Context) {
             !r
           })"""
         } else {
-          val labType = TypeName(s"${labStr}ThrowableLGE")
+          val labType = lbgCT(labStr)
           q"""$ss.withFilter($a => {
             val r = $p
             if (r) throw new $labType
@@ -70,20 +73,37 @@ class LBGMacros(val c: Context) {
     }
   }
 
+  def xformBreak(ex: c.Tree): c.Tree = {
+    val xf = new Transformer {
+      override def transform(expr: c.Tree): c.Tree = {
+        expr match {
+          case q"LabeledBreakableGenerator.break($labSym)" => {
+            val labStr = treeSymbol(labSym).toString.drop(1)
+            val labCT = lbgCT(labStr)
+            q"{ throw new $labCT }"
+          }
+          case _ => super.transform(expr)
+        }
+      }
+    }
+    xf.transform(ex)
+  }
+
   def xformLGE(expr: c.Tree): c.Tree = {
-    expr match {
+    val xxx = expr match {
       case q"$sub.$op[$_]($g)"
           if (List("map","flatMap","foreach").contains(termString(op))
               && !lgeLabel(sub).isEmpty) => {
         val labStr = lgeLabel(sub).get.toString.drop(1)
-        val brkType = TypeName(s"${labStr}ThrowableLGE")
-        val brkVar = TermName(s"${labStr}IterLGE")
+        val brkType = lbgCT(labStr)
+        val brkVar = lbgBG(labStr)
         val subXform = xformSubLGE(sub, labStr)
         val ge = lgeGE(sub)
+        val gx = xformLGE(g)
         val opExpr = if (List("map","flatMap").contains(termString(op))) {
           q"""$subXform.$op { vv =>
             try {
-              val g = $g
+              val g = $gx
               Some(g(vv))
             } catch {
               case _: $brkType => {
@@ -95,7 +115,7 @@ class LBGMacros(val c: Context) {
         } else {
           q"""$subXform.foreach { vv =>
             try {
-              val g = $g
+              val g = $gx
               g(vv)
             } catch {
               case _: $brkType => $brkVar.break
@@ -108,8 +128,11 @@ class LBGMacros(val c: Context) {
           $opExpr
         }"""
       }
-      case _ => throw new Exception("xformLGE: NO PATTERN MATCHED")
+      case q"$_.$op[$_]($_)" if (List("map","flatMap","foreach").contains(termString(op))) => 
+        xformLGE(expr)
+      case _ => expr
     }
+    xformBreak(xxx)
   }
 
   def check(expr: c.Tree): Unit = {
