@@ -3,7 +3,6 @@ import scala.reflect.macros.blackbox.Context
 
 class LBGMacros(val c: Context) {
   import c.universe._
-
   import TypeString._
 
   private def breakableBlockValid(blk: c.Tree): Boolean = {
@@ -16,12 +15,98 @@ class LBGMacros(val c: Context) {
     }
   }
 
+/*
+  breakable(arg, sym).withFilter(f1).withFilter(f2 break) ....  .map(g)
+
+  ---->
+
+  {
+    class sym_ControlThrowable extends ControlThrowable
+    val iterBI_sym = bi(arg)
+    iterBI_sym.withFilter(f1).withFilter(f2_var => filterBreak(f2_expr, iterBI_sym)).map { v =>
+      try {
+        g(v)
+      } catch {
+        t: sym_ControlThrowable => iter.break
+      }
+    }
+  }
+
+*/
+
+  def treeSymbol(s: c.Tree): scala.Symbol = {
+    val q"scala.Symbol.apply($stree)" = s
+    val q"${sname: String}" = stree
+    scala.Symbol(sname)
+  }
+
+  def lgeLabel(expr: c.Tree): Option[scala.Symbol] = {
+    expr match {
+      case q"LabeledBreakableGenerator.breakable[$_]($_, $labTree)" => Some(treeSymbol(labTree))
+      case q"$sub.withFilter($_)" => lgeLabel(sub)
+      case _ => None
+    }
+  }
+
+  def xformSubLGE(expr: c.Tree, brkVar: TermName): c.Tree = {
+    expr match {
+      case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
+      case q"$sub.withFilter($a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($sym))" => {
+        val ss = xformSubLGE(sub, brkVar)
+        q"""$ss.withFilter($a => {
+          val r = $p
+          if (r) $brkVar.break
+          !r
+        })"""
+      }
+      case q"$sub.withFilter($f)" => {
+        val ss = xformSubLGE(sub, brkVar)
+        q"$ss.withFilter($f)"
+      }
+      case _ => throw new Exception("xformSubLGE: NO PATTERN MATCHED")
+    }
+  }
+
+  def lgeGE(expr: c.Tree): c.Tree = {
+    expr match {
+      case q"LabeledBreakableGenerator.breakable[$_]($ge, $_)" => ge
+      case q"$sub.withFilter($_)" => lgeGE(sub)
+      case _ => throw new Exception("lgeGE: NO PATTERN MATCHED")
+    }
+  }
+
+  def xformLGE(expr: c.Tree): c.Tree = {
+    expr match {
+      case q"$sub.map[$_]($g)" if (!lgeLabel(sub).isEmpty) => {
+        val labsym = lgeLabel(sub).get
+        val labstr = labsym.toString.drop(1)
+        val brkType = TypeName(s"${labstr}ThrowableLGE")
+        val brkVar = TermName(s"${labstr}IterLGE")
+        val subXform = xformSubLGE(sub, brkVar)
+        val ge = lgeGE(sub)
+        q"""{
+          class $brkType extends scala.util.control.ControlThrowable
+          val $brkVar = new LabeledBreakableGenerator.BreakableIterator($ge.toIterator)
+          $subXform.map { vv =>
+            try {
+              val g = $g
+              g(vv)
+            } catch {
+              case _: $brkType => $brkVar.break
+            }
+          }
+        }"""
+      }
+      case _ => throw new Exception("xformLGE: NO PATTERN MATCHED")
+    }
+  }
+
   def breakableBlock(blk: c.Tree): c.Tree = {
-   println(showCode(blk))
-   if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
-    q"""
-      {}
-    """
+    println(showCode(blk))
+    if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
+    val t = xformLGE(blk)
+    println(showCode(t))
+    t
   }
 }
 
@@ -36,7 +121,7 @@ object LabeledBreakableGenerator {
     new BreakableIterator(t1.toIterator)
   }
 
-  def breakable[B](blk: => B): Unit = macro LBGMacros.breakableBlock
+  def breakable[B](blk: => B): B = macro LBGMacros.breakableBlock
 
   // Mediates boolean expression with 'break' and 'continue' invocations
   case class BreakableGuardCondition(cond: Boolean) {

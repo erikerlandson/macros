@@ -21,12 +21,14 @@ object Demo extends App {
 */
 
   import LabeledBreakableGenerator._
-  breakable {
+  val x = breakable {
     for {
       j <- breakable(1 to 10, 'loop);
-      if (j > 3) break('loop)
+      if (j > 3) break('loop);
+      if (j != 1)
     } yield {
       1 + j
     }
   }
+  println(s"x = ${x.toList}") 
 }
