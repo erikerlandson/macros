@@ -15,6 +15,8 @@ class LBGMacros(val c: Context) {
     }
   }
 
+  def termString(t: TermName) = t match { case TermName(n) => n }
+
   def treeSymbol(s: c.Tree): scala.Symbol = {
     val q"scala.Symbol.apply($stree)" = s
     val q"${sname: String}" = stree
@@ -29,21 +31,31 @@ class LBGMacros(val c: Context) {
     }
   }
 
-  def xformSubLGE(expr: c.Tree, brkVar: TermName): c.Tree = {
+  def xformSubLGE(expr: c.Tree, label: String): c.Tree = {
+    val brkVar = TermName(s"${label}IterLGE")
     expr match {
       case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
-      case q"$sub.withFilter($a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($sym))" => {
-        val labStr = treeSymbol(sym).toString.drop(1)
-        val labVar = TermName(s"${labStr}IterLGE")
-        val ss = xformSubLGE(sub, brkVar)
-        q"""$ss.withFilter($a => {
-          val r = $p
-          if (r) $labVar.break
-          !r
-        })"""
+      case q"$sub.withFilter($a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))" => {
+        val labStr = treeSymbol(labSym).toString.drop(1)
+        val ss = xformSubLGE(sub, label)
+        println(s"$labStr  =?=  $label")
+        if (labStr == label) {
+          q"""$ss.withFilter($a => {
+            val r = $p
+            if (r) $brkVar.break
+            !r
+          })"""
+        } else {
+          val labType = TypeName(s"${labStr}ThrowableLGE")
+          q"""$ss.withFilter($a => {
+            val r = $p
+            if (r) throw new $labType
+            !r
+          })"""
+        }
       }
       case q"$sub.withFilter($f)" => {
-        val ss = xformSubLGE(sub, brkVar)
+        val ss = xformSubLGE(sub, label)
         q"$ss.withFilter($f)"
       }
       case _ => throw new Exception("xformSubLGE: NO PATTERN MATCHED")
@@ -60,17 +72,16 @@ class LBGMacros(val c: Context) {
 
   def xformLGE(expr: c.Tree): c.Tree = {
     expr match {
-      case q"$sub.map[$_]($g)" if (!lgeLabel(sub).isEmpty) => {
-        val labsym = lgeLabel(sub).get
-        val labstr = labsym.toString.drop(1)
-        val brkType = TypeName(s"${labstr}ThrowableLGE")
-        val brkVar = TermName(s"${labstr}IterLGE")
-        val subXform = xformSubLGE(sub, brkVar)
+      case q"$sub.$op[$_]($g)"
+          if (List("map","flatMap","foreach").contains(termString(op))
+              && !lgeLabel(sub).isEmpty) => {
+        val labStr = lgeLabel(sub).get.toString.drop(1)
+        val brkType = TypeName(s"${labStr}ThrowableLGE")
+        val brkVar = TermName(s"${labStr}IterLGE")
+        val subXform = xformSubLGE(sub, labStr)
         val ge = lgeGE(sub)
-        q"""{
-          class $brkType extends scala.util.control.ControlThrowable
-          val $brkVar = new LabeledBreakableGenerator.BreakableIterator($ge.toIterator)
-          $subXform.map { vv =>
+        val opExpr = if (List("map","flatMap").contains(termString(op))) {
+          q"""$subXform.$op { vv =>
             try {
               val g = $g
               Some(g(vv))
@@ -80,7 +91,21 @@ class LBGMacros(val c: Context) {
                 None
               }
             }
-          }.filter(x => !x.isEmpty).map(_.get)
+          }.filter(x => !x.isEmpty).map(_.get)"""
+        } else {
+          q"""$subXform.foreach { vv =>
+            try {
+              val g = $g
+              g(vv)
+            } catch {
+              case _: $brkType => $brkVar.break
+            }
+          }"""
+        }
+        q"""{
+          class $brkType extends scala.util.control.ControlThrowable
+          val $brkVar = new LabeledBreakableGenerator.BreakableIterator($ge.toIterator)
+          $opExpr
         }"""
       }
       case _ => throw new Exception("xformLGE: NO PATTERN MATCHED")

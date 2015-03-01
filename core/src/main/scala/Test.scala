@@ -31,4 +31,25 @@ object Demo extends App {
     }
   }
   println(s"x = ${x.toList}") 
+
+  breakable {
+    for {
+      j <- breakable(1 to 10, 'loop);
+      if (j > 4) break('loop);
+      if (j != 1)
+    } {
+      println(s"j= $j")
+    }
+  }
+
+  breakable {
+    for {
+      j <- breakable(1 to 10, 'loop);
+      if (j > 4) break('loop);
+      if (j != 1)
+      k <- 1 to j
+    } {
+      println(s"j= $j  k= $k")
+    }
+  }
 }
