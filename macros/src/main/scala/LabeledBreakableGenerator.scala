@@ -128,8 +128,14 @@ class LBGMacros(val c: Context) {
           $opExpr
         }"""
       }
-      case q"$_.$op[$_]($_)" if (List("map","flatMap","foreach").contains(termString(op))) => 
-        xformLGE(expr)
+
+      case q"$sub.$op[$t]($g)"
+          if (List("map","flatMap","foreach").contains(termString(op))) => {
+        val subXform = xformSubLGE(sub, "")
+        val gx = xformLGE(g)
+        q"$subXform.$op[$t]($gx)"
+      }
+
       case _ => expr
     }
     xformBreak(xxx)
