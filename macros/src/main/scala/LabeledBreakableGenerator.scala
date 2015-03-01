@@ -35,7 +35,8 @@ class LBGMacros(val c: Context) {
     val brkVar = TermName(s"${label}IterLGE")
     expr match {
       case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
-      case q"$sub.withFilter($a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))" => {
+      case q"""$sub.withFilter(
+         $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" => {
         val labStr = treeSymbol(labSym).toString.drop(1)
         val ss = xformSubLGE(sub, label)
         println(s"$labStr  =?=  $label")
