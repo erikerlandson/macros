@@ -5,12 +5,13 @@ class LBGMacros(val c: Context) {
   import c.universe._
   import TypeString._
 
+  def isMonadicOp(op: TermName) = List("map", "flatMap", "foreach").contains(termString(op))
+  def isNonUnitOp(op: TermName) = List("map", "flatMap").contains(termString(op))
+
   private def breakableBlockValid(blk: c.Tree): Boolean = {
     // a single 'for' comprehension is valid: either a single 'map' or 'foreach' call
     blk match {
-      case q"$_.map[$_](..$_)" => true
-      case q"$_.flatMap[$_](..$_)" => true
-      case q"$_.foreach[$_](..$_)" => true
+      case q"$_.$op[$_]($_)" if (isMonadicOp(op)) => true
       case _ => false
     }
   }
@@ -91,16 +92,14 @@ class LBGMacros(val c: Context) {
 
   def xformLGE(expr: c.Tree): c.Tree = {
     val xxx = expr match {
-      case q"$sub.$op[$_]($g)"
-          if (List("map","flatMap","foreach").contains(termString(op))
-              && !lgeLabel(sub).isEmpty) => {
+      case q"$sub.$op[$_]($g)" if (isMonadicOp(op) && !lgeLabel(sub).isEmpty) => {
         val labStr = lgeLabel(sub).get.toString.drop(1)
         val brkType = lbgCT(labStr)
         val brkVar = lbgBG(labStr)
         val subXform = xformSubLGE(sub, labStr)
         val ge = lgeGE(sub)
         val gx = xformLGE(g)
-        val opExpr = if (List("map","flatMap").contains(termString(op))) {
+        val opExpr = if (isNonUnitOp(op)) {
           q"""$subXform.$op { vv =>
             try {
               val g = $gx
@@ -129,8 +128,7 @@ class LBGMacros(val c: Context) {
         }"""
       }
 
-      case q"$sub.$op[$t]($g)"
-          if (List("map","flatMap","foreach").contains(termString(op))) => {
+      case q"$sub.$op[$t]($g)" if (isMonadicOp(op)) => {
         val subXform = xformSubLGE(sub, "")
         val gx = xformLGE(g)
         q"$subXform.$op[$t]($gx)"
