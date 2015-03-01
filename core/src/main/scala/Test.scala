@@ -24,7 +24,7 @@ object Demo extends App {
   val x = breakable {
     for {
       j <- breakable(1 to 10, 'loop);
-      if (j > 3) break('loop);
+      if (j > 4) break('loop);
       if (j != 1)
     } yield {
       1 + j

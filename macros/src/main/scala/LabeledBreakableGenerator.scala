@@ -15,25 +15,6 @@ class LBGMacros(val c: Context) {
     }
   }
 
-/*
-  breakable(arg, sym).withFilter(f1).withFilter(f2 break) ....  .map(g)
-
-  ---->
-
-  {
-    class sym_ControlThrowable extends ControlThrowable
-    val iterBI_sym = bi(arg)
-    iterBI_sym.withFilter(f1).withFilter(f2_var => filterBreak(f2_expr, iterBI_sym)).map { v =>
-      try {
-        g(v)
-      } catch {
-        t: sym_ControlThrowable => iter.break
-      }
-    }
-  }
-
-*/
-
   def treeSymbol(s: c.Tree): scala.Symbol = {
     val q"scala.Symbol.apply($stree)" = s
     val q"${sname: String}" = stree
@@ -52,10 +33,12 @@ class LBGMacros(val c: Context) {
     expr match {
       case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
       case q"$sub.withFilter($a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($sym))" => {
+        val labStr = treeSymbol(sym).toString.drop(1)
+        val labVar = TermName(s"${labStr}IterLGE")
         val ss = xformSubLGE(sub, brkVar)
         q"""$ss.withFilter($a => {
           val r = $p
-          if (r) $brkVar.break
+          if (r) $labVar.break
           !r
         })"""
       }
@@ -90,22 +73,29 @@ class LBGMacros(val c: Context) {
           $subXform.map { vv =>
             try {
               val g = $g
-              g(vv)
+              Some(g(vv))
             } catch {
-              case _: $brkType => $brkVar.break
+              case _: $brkType => {
+                $brkVar.break
+                None
+              }
             }
-          }
+          }.filter(x => !x.isEmpty).map(_.get)
         }"""
       }
       case _ => throw new Exception("xformLGE: NO PATTERN MATCHED")
     }
   }
 
+  def check(expr: c.Tree): Unit = {
+    println(s"CODE= ${showCode(expr)}")
+    println(s"TYPE= ${c.typeCheck(expr).tpe.toString}")
+  }
+
   def breakableBlock(blk: c.Tree): c.Tree = {
     println(showCode(blk))
     if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val t = xformLGE(blk)
-    println(showCode(t))
     t
   }
 }
@@ -115,20 +105,20 @@ object LabeledBreakableGenerator {
 
   type BreakableGenerator[+A] = BreakableIterator[A]
 
-  // Generates a new breakable generator from any traversable object.
-  def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] = {
-    throw new Exception("Can't invoke this directly, it's a macro placeholder")
-    new BreakableIterator(t1.toIterator)
-  }
+  // Semantically, represents a breakable generator inside a 'breakable' block
+  // Stub that can't be invoked directly, must be processed via macro
+  def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] = ???
 
   def breakable[B](blk: => B): B = macro LBGMacros.breakableBlock
 
+  // represents breaking a labled generator
+  def break(label: Symbol): Unit = ???
+
   // Mediates boolean expression with 'break' and 'continue' invocations
   case class BreakableGuardCondition(cond: Boolean) {
-    def break(label: Symbol): Boolean = {
-      throw new Exception("Can't invoke this directly, it's a macro placeholder")
-      false
-    }
+    // Semantically, represents breaking some labeled generator
+    // This is a stub that cannot be invoked directly outside a macro call
+    def break(label: Symbol): Boolean = ???
   }
 
   // implicit conversion of boolean values to breakable guard condition mediary
