@@ -39,7 +39,6 @@ class LBGMacros(val c: Context) {
          $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" => {
         val labStr = treeSymbol(labSym).toString.drop(1)
         val ss = xformSubLGE(sub, label)
-        println(s"$labStr  =?=  $label")
         if (labStr == label) {
           q"""$ss.withFilter($a => {
             val r = $p
@@ -119,7 +118,7 @@ class LBGMacros(val c: Context) {
   }
 
   def breakableBlock(blk: c.Tree): c.Tree = {
-    println(showCode(blk))
+//    println(showCode(blk))
     if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val t = xformLGE(blk)
     t
