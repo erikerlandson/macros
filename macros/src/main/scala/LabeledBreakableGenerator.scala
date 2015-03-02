@@ -76,18 +76,29 @@ class LBGMacros(val c: Context) {
 
   def xformBreak(ex: c.Tree): c.Tree = {
     val xf = new Transformer {
-      override def transform(expr: c.Tree): c.Tree = {
+      override def transform(expr: c.Tree) = {
         expr match {
           case q"LabeledBreakableGenerator.break($labSym)" => {
+            println("BREAK")
+            check(expr)
             val labStr = treeSymbol(labSym).toString.drop(1)
             val labCT = lbgCT(labStr)
             q"{ throw new $labCT }"
           }
-          case _ => super.transform(expr)
+          case _ => {
+            println("CATCHALL")
+            check(expr)
+            super.transform(expr)
+          }
         }
       }
     }
-    xf.transform(ex)
+    println("************** xformBreak *****************")
+    check(ex)
+    println("******")
+    val r = xf.transform(ex)
+    println("*******************************************")
+    r
   }
 
   def xformLGE(expr: c.Tree): c.Tree = {
@@ -141,13 +152,18 @@ class LBGMacros(val c: Context) {
 
   def check(expr: c.Tree): Unit = {
     println(s"CODE= ${showCode(expr)}")
-    println(s"TYPE= ${c.typeCheck(expr).tpe.toString}")
+    //println(s"TYPE= ${c.typecheck(expr).tpe.toString}")
   }
 
   def breakableBlock(blk: c.Tree): c.Tree = {
 //    println(showCode(blk))
     if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
+    println("****** entering xformLGE ********")
     val t = xformLGE(blk)
+    c.typecheck(t)
+    println("****** exited xformLGE *******")
+    check(t)
+    println("***** EXITING breakableBlock ********")
     t
   }
 }

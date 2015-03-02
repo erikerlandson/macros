@@ -8,7 +8,7 @@ object BuildSettings {
     scalaVersion := "2.11.5",
     resolvers += Resolver.sonatypeRepo("snapshots"),
     resolvers += Resolver.sonatypeRepo("releases"),
-    scalacOptions ++= Seq()
+    scalacOptions ++= Seq("-deprecation")
   )
 }
 
