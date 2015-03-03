@@ -75,22 +75,19 @@ class LBGMacros(val c: Context) {
     }
   }
 
-  def xformBreak(ex: c.Tree): c.Tree = {
-    val xf = new Transformer {
-      override def transform(expr: c.Tree) = {
-        expr match {
-          case q"LabeledBreakableGenerator.break($labSym)" => {
-            val labStr = treeSymbol(labSym).toString.drop(1)
-            val ctObj = lbgObj(labStr)
-            q"{ throw $ctObj }"
-          }
-          case _ => {
-            super.transform(expr)
-          }
+  object xformBreak extends Transformer {
+    override def transform(expr: c.Tree) = {
+      expr match {
+        case q"LabeledBreakableGenerator.break($labSym)" => {
+          val labStr = treeSymbol(labSym).toString.drop(1)
+          val ctObj = lbgObj(labStr)
+          q"{ throw $ctObj }"
+        }
+        case _ => {
+          super.transform(expr)
         }
       }
     }
-    xf.transform(ex)
   }
 
   def xformLGE(expr: c.Tree): c.Tree = {
@@ -141,7 +138,7 @@ class LBGMacros(val c: Context) {
 
       case _ => expr
     }
-    xformBreak(xxx)
+    xformBreak.transform(xxx)
   }
 
   def check(expr: c.Tree): Unit = {
