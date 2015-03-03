@@ -34,7 +34,6 @@ class LBGMacros(val c: Context) {
 
   def lbgCT(lab: String) = TypeName(s"${lab}$$ThrowableLBG")
   def lbgObj(lab: String) = TermName(s"${lab}$$ThrowableObj")
-  def lbgThrow(lab: String) = TermName(s"${lab}Throw")
   def lbgBG(lab: String) = TermName(s"${lab}$$IterLBG")
 
   def xformSubLGE(expr: c.Tree, label: String): c.Tree = {
@@ -52,10 +51,10 @@ class LBGMacros(val c: Context) {
             !r
           })"""
         } else {
-          val ctThrow = lbgThrow(labStr)
+          val ctObj = lbgObj(labStr)
           q"""$ss.withFilter($a => {
             val r = $p
-            if (r) $ctThrow()
+            if (r) { throw $ctObj }
             !r
           })"""
         }
@@ -81,28 +80,17 @@ class LBGMacros(val c: Context) {
       override def transform(expr: c.Tree) = {
         expr match {
           case q"LabeledBreakableGenerator.break($labSym)" => {
-            println("BREAK")
-            check(expr)
             val labStr = treeSymbol(labSym).toString.drop(1)
-            val ctThrow = lbgThrow(labStr)
             val ctObj = lbgObj(labStr)
-//            q"{ $ctThrow() }"
             q"{ throw $ctObj }"
           }
           case _ => {
-//            println("CATCHALL")
-//            check(expr)
             super.transform(expr)
           }
         }
       }
     }
-//    println("************** xformBreak *****************")
-//    check(ex)
-//    println("******")
-    val r = xf.transform(ex)
-//    println("*******************************************")
-    r
+    xf.transform(ex)
   }
 
   def xformLGE(expr: c.Tree): c.Tree = {
@@ -112,11 +100,9 @@ class LBGMacros(val c: Context) {
         val brkType = lbgCT(labStr)
         val brkVar = lbgBG(labStr)
         val ctObj = lbgObj(labStr)
-        val ctThrow = lbgThrow(labStr)
         val subXform = xformSubLGE(sub, labStr)
         val ge = lgeGE(sub)
         val gbx = xformLGE(gbody)
-//        val gx = q"""$ga => $gbx"""
         val opExpr = if (isNonUnitOp(op)) {
           q"""$subXform.$op { $$v =>
             try {
@@ -139,11 +125,9 @@ class LBGMacros(val c: Context) {
             }
           }"""
         }
-        c.untypecheck(opExpr)
         q"""{
           class $brkType extends scala.util.control.ControlThrowable
           object $ctObj extends $brkType
-          def $ctThrow() { throw $ctObj }
           val $brkVar = new LabeledBreakableGenerator.BreakableIterator($ge.toIterator)
           $opExpr
         }"""
@@ -168,12 +152,7 @@ class LBGMacros(val c: Context) {
   def breakableBlock(blk: c.Tree): c.Tree = {
 //    println(showCode(blk))
     if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
-    println("****** entering xformLGE ********")
     val t = xformLGE(blk)
-//    c.typecheck(t)
-    println("****** exited xformLGE *******")
-    check(t)
-    println("***** EXITING breakableBlock ********")
     t
   }
 }
