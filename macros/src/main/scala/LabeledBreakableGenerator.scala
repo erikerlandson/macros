@@ -168,14 +168,14 @@ object breakablecomprehension {
   def break(label: Symbol): Unit = ???
 
   // Mediates boolean expression with 'break' invocations
-  case class BreakingGuard(cond: Boolean) {
+  class BreakingGuard(val cond: Boolean) extends AnyVal {
     // Semantically, represents breaking some labeled generator
     // This is a stub that cannot be invoked directly outside a macro call
     def break(label: Symbol): Boolean = ???
   }
 
   // implicit conversion of boolean values to breakable guard condition mediary
-  implicit def toBreakingGuard(cond: Boolean) = BreakingGuard(cond)
+  implicit def toBreakingGuard(cond: Boolean) = new BreakingGuard(cond)
 
   // An iterator that can be halted via its 'break' method.  Not invoked directly
   class BreakableGenerator[+A](itr: Iterator[A]) extends Iterator[A] {
