@@ -1,7 +1,7 @@
 import scala.language.experimental.macros
 import scala.reflect.macros.blackbox.Context
 
-class LBGMacros(val c: Context) {
+class BreakableComprehensionMacros(val c: Context) {
   import c.universe._
 
   private def check(expr: c.Tree): Unit = {
@@ -31,13 +31,13 @@ class LBGMacros(val c: Context) {
   object xformBreak extends Transformer {
     override def transform(expr: c.Tree) = {
       expr match {
-        case q"LabeledBreakableGenerator.break($labSym)" => {
+        case q"breakablecomprehension.break($labSym)" => {
           val ctObj = lbgObj(symbolStr(labSym))
           q"{ throw $ctObj }"
         }
 
         case q"""$sub.withFilter(
-          $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" => {
+          $a => breakablecomprehension.toBreakingGuard($p).break($labSym))""" => {
           val subx = this.transform(sub)
           val ctObj = lbgObj(symbolStr(labSym))
           q"""$subx.withFilter($a => {
@@ -55,7 +55,7 @@ class LBGMacros(val c: Context) {
   private object xformMap extends Transformer {
     private def label(expr: c.Tree): Option[String] = {
       expr match {
-        case q"LabeledBreakableGenerator.breakable[$_]($_, $labTree)" => Some(symbolStr(labTree))
+        case q"breakablecomprehension.breakable[$_]($_, $labTree)" => Some(symbolStr(labTree))
         case q"$sub.withFilter($_)" => label(sub)
         case _ => None
       }
@@ -64,10 +64,10 @@ class LBGMacros(val c: Context) {
     private def lbg(expr: c.Tree, bgLab: String): c.Tree = {
       val brkVar = lbgBG(bgLab)
       expr match {
-        case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
+        case q"breakablecomprehension.breakable[$_]($_, $_)" => q"$brkVar"
 
         case q"""$sub.withFilter(
-            $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" 
+            $a => breakablecomprehension.toBreakingGuard($p).break($labSym))""" 
             if (bgLab == symbolStr(labSym)) => {
           val subx = lbg(sub, bgLab)
           q"""$subx.withFilter($a => {
@@ -88,7 +88,7 @@ class LBGMacros(val c: Context) {
 
     private def generator(expr: c.Tree): c.Tree = {
       expr match {
-        case q"LabeledBreakableGenerator.breakable[$_]($ge, $_)" => ge
+        case q"breakablecomprehension.breakable[$_]($ge, $_)" => ge
         case q"$sub.withFilter($_)" => generator(sub)
         case _ => throw new Exception("generator: NO PATTERN MATCHED")
       }
@@ -129,7 +129,7 @@ class LBGMacros(val c: Context) {
           q"""{
             class $brkType extends scala.util.control.ControlThrowable
             object $ctObj extends $brkType
-            val $brkVar = new LabeledBreakableGenerator.BreakableGenerator($ge.toIterator)
+            val $brkVar = new breakablecomprehension.BreakableGenerator($ge.toIterator)
             $opExpr
           }"""
         }
@@ -139,7 +139,7 @@ class LBGMacros(val c: Context) {
     }
   }
 
-  private def breakableBlockValid(blk: c.Tree): Boolean = {
+  private def valid(blk: c.Tree): Boolean = {
     // a single 'for' comprehension is valid: either a single 'map' or 'foreach' call
     blk match {
       case q"$_.$op[$_]($_)" if (isMonadicOp(op)) => true
@@ -147,36 +147,35 @@ class LBGMacros(val c: Context) {
     }
   }
 
-  def breakableBlock(blk: c.Tree): c.Tree = {
-    if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
+  def xform(blk: c.Tree): c.Tree = {
+    if (!valid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val mapx = xformMap.transform(blk)
     val r = xformBreak.transform(c.untypecheck(mapx))
     r
   }
 }
 
-object LabeledBreakableGenerator {
+object breakablecomprehension {
   import scala.language.implicitConversions
+
+  def breakable[B](blk: => B): B = macro BreakableComprehensionMacros.xform
 
   // Semantically, represents a breakable generator inside a 'breakable' block
   // Stub that can't be invoked directly, must be processed via macro
   def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] = ???
 
-  def breakable[B](blk: => B): B = macro LBGMacros.breakableBlock
-
   // represents breaking a labled generator
   def break(label: Symbol): Unit = ???
 
-  // Mediates boolean expression with 'break' and 'continue' invocations
-  case class BreakableGuardCondition(cond: Boolean) {
+  // Mediates boolean expression with 'break' invocations
+  case class BreakingGuard(cond: Boolean) {
     // Semantically, represents breaking some labeled generator
     // This is a stub that cannot be invoked directly outside a macro call
     def break(label: Symbol): Boolean = ???
   }
 
   // implicit conversion of boolean values to breakable guard condition mediary
-  implicit def toBreakableGuardCondition(cond: Boolean) =
-    BreakableGuardCondition(cond)
+  implicit def toBreakingGuard(cond: Boolean) = BreakingGuard(cond)
 
   // An iterator that can be halted via its 'break' method.  Not invoked directly
   class BreakableGenerator[+A](itr: Iterator[A]) extends Iterator[A] {

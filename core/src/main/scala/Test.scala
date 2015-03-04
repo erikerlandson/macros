@@ -1,5 +1,5 @@
 object Demo extends App {
-  import LabeledBreakableGenerator._
+  import breakablecomprehension._
 
   val x = 3
   val y = 1
