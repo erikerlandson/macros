@@ -3,10 +3,141 @@ import scala.reflect.macros.blackbox.Context
 
 class LBGMacros(val c: Context) {
   import c.universe._
-  import TypeString._
 
-  def isMonadicOp(op: TermName) = List("map", "flatMap", "foreach").contains(termString(op))
-  def isNonUnitOp(op: TermName) = List("map", "flatMap").contains(termString(op))
+  private def check(expr: c.Tree): Unit = {
+    println(s"CODE= ${showCode(expr)}")
+    try {
+      println(s"TYPE= ${c.typecheck(expr).tpe.toString}")
+    } catch {
+      case _: Exception => println("TYPE= <NONE>")
+    }
+  }
+
+  private def termString(t: TermName) = t match { case TermName(n) => n }
+
+  private def isMonadicOp(op: TermName) = List("map", "flatMap", "foreach").contains(termString(op))
+  private def isNonUnitOp(op: TermName) = List("map", "flatMap").contains(termString(op))
+
+  private def symbolStr(s: c.Tree): String = {
+    val q"scala.Symbol.apply($stree)" = s
+    val q"${sname: String}" = stree
+    sname
+  }
+
+  private def lbgCT(lab: String) = TypeName(s"${lab}$$ThrowableLBG")
+  private def lbgObj(lab: String) = TermName(s"${lab}$$ThrowableObj")
+  private def lbgBG(lab: String) = TermName(s"${lab}$$IterLBG")
+
+  object xformBreak extends Transformer {
+    override def transform(expr: c.Tree) = {
+      expr match {
+        case q"LabeledBreakableGenerator.break($labSym)" => {
+          val ctObj = lbgObj(symbolStr(labSym))
+          q"{ throw $ctObj }"
+        }
+
+        case q"""$sub.withFilter(
+          $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" => {
+          val subx = this.transform(sub)
+          val ctObj = lbgObj(symbolStr(labSym))
+          q"""$subx.withFilter($a => {
+            val r = $p
+            if (r) { throw $ctObj }
+            !r
+          })"""
+        }
+
+        case _ => super.transform(expr)
+      }
+    }
+  }
+
+  private object xformMap extends Transformer {
+    private def label(expr: c.Tree): Option[String] = {
+      expr match {
+        case q"LabeledBreakableGenerator.breakable[$_]($_, $labTree)" => Some(symbolStr(labTree))
+        case q"$sub.withFilter($_)" => label(sub)
+        case _ => None
+      }
+    }
+
+    private def lbg(expr: c.Tree, bgLab: String): c.Tree = {
+      val brkVar = lbgBG(bgLab)
+      expr match {
+        case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
+
+        case q"""$sub.withFilter(
+            $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" 
+            if (bgLab == symbolStr(labSym)) => {
+          val subx = lbg(sub, bgLab)
+          q"""$subx.withFilter($a => {
+            val r = $p
+            if (r) $brkVar.break
+            !r
+          })"""
+        }
+
+        case q"$sub.withFilter($f)" => {
+          val subx = lbg(sub, bgLab)
+          q"$subx.withFilter($f)"
+        }
+
+        case _ => throw new Exception("lbg: NO PATTERN MATCHED")
+      }
+    }
+
+    private def generator(expr: c.Tree): c.Tree = {
+      expr match {
+        case q"LabeledBreakableGenerator.breakable[$_]($ge, $_)" => ge
+        case q"$sub.withFilter($_)" => generator(sub)
+        case _ => throw new Exception("generator: NO PATTERN MATCHED")
+      }
+    }
+
+    override def transform(expr: c.Tree) = {
+      expr match {
+        case q"$sub.$op[$_]($g)" if (isMonadicOp(op) && !label(sub).isEmpty) => {
+          val labStr = label(sub).get
+          val brkType = lbgCT(labStr)
+          val brkVar = lbgBG(labStr)
+          val ctObj = lbgObj(labStr)
+          val subx = lbg(sub, labStr)
+          val ge = generator(sub)
+          val gx = this.transform(g)
+          val opExpr = if (isNonUnitOp(op)) {
+            q"""$subx.$op { $$v =>
+              try {
+                val $$g = $gx
+                Some($$g($$v))
+              } catch {
+                case _: $brkType => {
+                  $brkVar.break
+                  None
+                }
+              }
+            }.filter(!_.isEmpty).map(_.get)"""
+          } else {
+            q"""$subx.foreach { $$v =>
+              try {
+                val $$g = $gx
+                $$g($$v)
+              } catch {
+                case _: $brkType => $brkVar.break
+              }
+            }"""
+          }
+          q"""{
+            class $brkType extends scala.util.control.ControlThrowable
+            object $ctObj extends $brkType
+            val $brkVar = new LabeledBreakableGenerator.BreakableGenerator($ge.toIterator)
+            $opExpr
+          }"""
+        }
+
+        case _ => super.transform(expr)
+      }
+    }
+  }
 
   private def breakableBlockValid(blk: c.Tree): Boolean = {
     // a single 'for' comprehension is valid: either a single 'map' or 'foreach' call
@@ -16,148 +147,17 @@ class LBGMacros(val c: Context) {
     }
   }
 
-  def termString(t: TermName) = t match { case TermName(n) => n }
-
-  def treeSymbol(s: c.Tree): scala.Symbol = {
-    val q"scala.Symbol.apply($stree)" = s
-    val q"${sname: String}" = stree
-    scala.Symbol(sname)
-  }
-
-  def lgeLabel(expr: c.Tree): Option[scala.Symbol] = {
-    expr match {
-      case q"LabeledBreakableGenerator.breakable[$_]($_, $labTree)" => Some(treeSymbol(labTree))
-      case q"$sub.withFilter($_)" => lgeLabel(sub)
-      case _ => None
-    }
-  }
-
-  def lbgCT(lab: String) = TypeName(s"${lab}$$ThrowableLBG")
-  def lbgObj(lab: String) = TermName(s"${lab}$$ThrowableObj")
-  def lbgBG(lab: String) = TermName(s"${lab}$$IterLBG")
-
-  def xformSubLGE(expr: c.Tree, label: String): c.Tree = {
-    val brkVar = lbgBG(label)
-    expr match {
-      case q"LabeledBreakableGenerator.breakable[$_]($_, $_)" => q"$brkVar"
-      case q"""$sub.withFilter(
-         $a => LabeledBreakableGenerator.toBreakableGuardCondition($p).break($labSym))""" => {
-        val labStr = treeSymbol(labSym).toString.drop(1)
-        val ss = xformSubLGE(sub, label)
-        if (labStr == label) {
-          q"""$ss.withFilter($a => {
-            val r = $p
-            if (r) $brkVar.break
-            !r
-          })"""
-        } else {
-          val ctObj = lbgObj(labStr)
-          q"""$ss.withFilter($a => {
-            val r = $p
-            if (r) { throw $ctObj }
-            !r
-          })"""
-        }
-      }
-      case q"$sub.withFilter($f)" => {
-        val ss = xformSubLGE(sub, label)
-        q"$ss.withFilter($f)"
-      }
-      case _ => expr
-    }
-  }
-
-  def lgeGE(expr: c.Tree): c.Tree = {
-    expr match {
-      case q"LabeledBreakableGenerator.breakable[$_]($ge, $_)" => ge
-      case q"$sub.withFilter($_)" => lgeGE(sub)
-      case _ => throw new Exception("lgeGE: NO PATTERN MATCHED")
-    }
-  }
-
-  object xformBreak extends Transformer {
-    override def transform(expr: c.Tree) = {
-      expr match {
-        case q"LabeledBreakableGenerator.break($labSym)" => {
-          val labStr = treeSymbol(labSym).toString.drop(1)
-          val ctObj = lbgObj(labStr)
-          q"{ throw $ctObj }"
-        }
-        case _ => {
-          super.transform(expr)
-        }
-      }
-    }
-  }
-
-  def xformLGE(expr: c.Tree): c.Tree = {
-    val xxx = expr match {
-      case q"$sub.$op[$_]($ga => $gbody)" if (isMonadicOp(op) && !lgeLabel(sub).isEmpty) => {
-        val labStr = lgeLabel(sub).get.toString.drop(1)
-        val brkType = lbgCT(labStr)
-        val brkVar = lbgBG(labStr)
-        val ctObj = lbgObj(labStr)
-        val subXform = xformSubLGE(sub, labStr)
-        val ge = lgeGE(sub)
-        val gbx = xformLGE(gbody)
-        val opExpr = if (isNonUnitOp(op)) {
-          q"""$subXform.$op { $$v =>
-            try {
-              val g = $ga => $gbx
-              Some(g($$v))
-            } catch {
-              case _: $brkType => {
-                $brkVar.break
-                None
-              }
-            }
-          }.filter(!_.isEmpty).map(_.get)"""
-        } else {
-          q"""$subXform.foreach { $$v =>
-            try {
-              val g = $ga => $gbx
-              g($$v)
-            } catch {
-              case _: $brkType => $brkVar.break
-            }
-          }"""
-        }
-        q"""{
-          class $brkType extends scala.util.control.ControlThrowable
-          object $ctObj extends $brkType
-          val $brkVar = new LabeledBreakableGenerator.BreakableIterator($ge.toIterator)
-          $opExpr
-        }"""
-      }
-
-      case q"$sub.$op[$t]($g)" if (isMonadicOp(op)) => {
-        val subXform = xformSubLGE(sub, "")
-        val gx = xformLGE(g)
-        c.untypecheck(q"$subXform.$op[$t]($gx)")
-      }
-
-      case _ => expr
-    }
-    xformBreak.transform(xxx)
-  }
-
-  def check(expr: c.Tree): Unit = {
-    println(s"CODE= ${showCode(expr)}")
-//    println(s"TYPE= ${c.typecheck(expr).tpe.toString}")
-  }
-
   def breakableBlock(blk: c.Tree): c.Tree = {
-//    println(showCode(blk))
     if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
-    val t = xformLGE(blk)
-    t
+    val mapx = xformMap.transform(blk)
+    val r = xformBreak.transform(c.untypecheck(mapx))
+    check(r)
+    r
   }
 }
 
 object LabeledBreakableGenerator {
   import scala.language.implicitConversions
-
-  type BreakableGenerator[+A] = BreakableIterator[A]
 
   // Semantically, represents a breakable generator inside a 'breakable' block
   // Stub that can't be invoked directly, must be processed via macro
@@ -180,7 +180,7 @@ object LabeledBreakableGenerator {
     BreakableGuardCondition(cond)
 
   // An iterator that can be halted via its 'break' method.  Not invoked directly
-  class BreakableIterator[+A](itr: Iterator[A]) extends Iterator[A] {
+  class BreakableGenerator[+A](itr: Iterator[A]) extends Iterator[A] {
     private var broken = false
     def break { broken = true }
 
