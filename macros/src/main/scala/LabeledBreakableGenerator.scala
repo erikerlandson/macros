@@ -53,9 +53,10 @@ class BreakableComprehensionMacros(val c: Context) {
   }
 
   private object xformMap extends Transformer {
-    private def label(expr: c.Tree): Option[String] = {
+    private def label(expr: c.Tree): Option[(String, c.Tree)] = {
       expr match {
-        case q"breakablecomprehension.breakable[$_]($_, $labTree)" => Some(symbolStr(labTree))
+        case q"breakablecomprehension.toBreakableGenerator[$_]($ge).breakable($labTree)" =>
+          Some((symbolStr(labTree), ge))
         case q"$sub.withFilter($_)" => label(sub)
         case _ => None
       }
@@ -64,7 +65,7 @@ class BreakableComprehensionMacros(val c: Context) {
     private def lbg(expr: c.Tree, bgLab: String): c.Tree = {
       val brkVar = lbgBG(bgLab)
       expr match {
-        case q"breakablecomprehension.breakable[$_]($_, $_)" => q"$brkVar"
+        case q"breakablecomprehension.toBreakableGenerator[$_]($_).breakable($_)" => q"$brkVar"
 
         case q"""$sub.withFilter(
             $a => breakablecomprehension.toBreakingGuard($p).break($labSym))""" 
@@ -86,23 +87,14 @@ class BreakableComprehensionMacros(val c: Context) {
       }
     }
 
-    private def generator(expr: c.Tree): c.Tree = {
-      expr match {
-        case q"breakablecomprehension.breakable[$_]($ge, $_)" => ge
-        case q"$sub.withFilter($_)" => generator(sub)
-        case _ => throw new Exception("generator: NO PATTERN MATCHED")
-      }
-    }
-
     override def transform(expr: c.Tree) = {
       expr match {
         case q"$sub.$op[$_]($g)" if (isMonadicOp(op) && !label(sub).isEmpty) => {
-          val labStr = label(sub).get
+          val (labStr, ge) = label(sub).get
           val brkType = lbgCT(labStr)
           val brkVar = lbgBG(labStr)
           val ctObj = lbgObj(labStr)
           val subx = lbg(sub, labStr)
-          val ge = generator(sub)
           val gx = this.transform(g)
           val opExpr = if (isNonUnitOp(op)) {
             q"""$subx.$op { $$v =>
@@ -129,7 +121,7 @@ class BreakableComprehensionMacros(val c: Context) {
           q"""{
             class $brkType extends scala.util.control.ControlThrowable
             object $ctObj extends $brkType
-            val $brkVar = new breakablecomprehension.BreakableGenerator($ge.toIterator)
+            val $brkVar = new breakablecomprehension.BreakableIterator($ge.toIterator)
             $opExpr
           }"""
         }
@@ -162,10 +154,15 @@ object breakablecomprehension {
 
   // Semantically, represents a breakable generator inside a 'breakable' block
   // Stub that can't be invoked directly, must be processed via macro
-  def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableGenerator[A] = ???
+  //def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableIterator[A] = ???
 
   // represents breaking a labled generator
   def break(label: Symbol): Unit = ???
+
+  class BreakableGenerator[A](val gen: TraversableOnce[A]) extends AnyVal {
+    def breakable(label: Symbol): BreakableIterator[A] = ???
+  }
+  implicit def toBreakableGenerator[A](gen: TraversableOnce[A]) = new BreakableGenerator(gen)
 
   // Mediates boolean expression with 'break' invocations
   class BreakingGuard(val cond: Boolean) extends AnyVal {
@@ -178,7 +175,7 @@ object breakablecomprehension {
   implicit def toBreakingGuard(cond: Boolean) = new BreakingGuard(cond)
 
   // An iterator that can be halted via its 'break' method.  Not invoked directly
-  class BreakableGenerator[+A](itr: Iterator[A]) extends Iterator[A] {
+  class BreakableIterator[+A](itr: Iterator[A]) extends Iterator[A] {
     private var broken = false
     def break { broken = true }
 
