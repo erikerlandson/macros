@@ -151,7 +151,6 @@ class LBGMacros(val c: Context) {
     if (!breakableBlockValid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val mapx = xformMap.transform(blk)
     val r = xformBreak.transform(c.untypecheck(mapx))
-    check(r)
     r
   }
 }
