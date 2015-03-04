@@ -96,7 +96,7 @@ class BreakableComprehensionMacros(val c: Context) {
           val ctObj = lbgObj(labStr)
           val subx = lbg(sub, labStr)
           val gx = this.transform(g)
-          val opExpr = if (isNonUnitOp(op)) {
+          val opExpr = if (termString(op) == "map") {
             q"""$subx.$op { $$v =>
               try {
                 val $$g = $gx
@@ -108,6 +108,18 @@ class BreakableComprehensionMacros(val c: Context) {
                 }
               }
             }.filter(!_.isEmpty).map(_.get)"""
+          } else if (termString(op) == "flatMap") {
+            q"""$subx.$op { $$v =>
+              try {
+                val $$g = $gx
+                $$g($$v)
+              } catch {
+                case _: $brkType => {
+                  $brkVar.break
+                  Iterator.empty
+                }
+              }
+            }"""
           } else {
             q"""$subx.foreach { $$v =>
               try {
@@ -118,12 +130,18 @@ class BreakableComprehensionMacros(val c: Context) {
               }
             }"""
           }
-          q"""{
+          val r = q"""{
             class $brkType extends scala.util.control.ControlThrowable
             object $ctObj extends $brkType
             val $brkVar = new breakablecomprehension.BreakableIterator($ge.toIterator)
             $opExpr
           }"""
+          r
+//          val q = xformBreak.transform(c.untypecheck(r))
+//          println("**********************")
+//          check(q)
+//          println("**********************")
+//          q
         }
 
         case _ => super.transform(expr)
@@ -143,6 +161,7 @@ class BreakableComprehensionMacros(val c: Context) {
     if (!valid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val mapx = xformMap.transform(blk)
     val r = xformBreak.transform(c.untypecheck(mapx))
+//    check(r)
     r
   }
 }
