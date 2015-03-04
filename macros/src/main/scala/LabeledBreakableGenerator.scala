@@ -1,8 +1,7 @@
 import scala.language.experimental.macros
 import scala.reflect.macros.blackbox.Context
 
-object BreakableComprehensionMacros {
-  // An iterator that can be halted via its 'break' method.  Not invoked directly
+object BCMacros {
   class BreakableIterator[+A](itr: Iterator[A]) extends Iterator[A] {
     private var broken = false
     def break { broken = true }
@@ -11,10 +10,15 @@ object BreakableComprehensionMacros {
     def next = itr.next
   }
 
-  class Throwable extends scala.util.control.ControlThrowable
+  class BCThrowable extends scala.util.control.ControlThrowable
+
+  class EitherIterator[+A](itr: Iterator[A]) extends Iterator[Either[BCThrowable, A]] {
+    def hasNext = itr.hasNext
+    def next = Right(itr.next)
+  }
 }
 
-class BreakableComprehensionMacros(val c: Context) {
+class BCMacros(val c: Context) {
   import c.universe._
 
   private def check(expr: c.Tree): Unit = {
@@ -144,9 +148,9 @@ class BreakableComprehensionMacros(val c: Context) {
             }"""
           }
           val r = q"""{
-            class $brkType extends BreakableComprehensionMacros.Throwable
+            class $brkType extends BCMacros.BCThrowable
             object $ctObj extends $brkType
-            val $brkVar = new BreakableComprehensionMacros.BreakableIterator($ge.toIterator)
+            val $brkVar = new BCMacros.BreakableIterator($ge.toIterator)
             $opExpr
           }"""
           r
@@ -183,13 +187,13 @@ class BreakableComprehensionMacros(val c: Context) {
 object breakablecomprehension {
   import scala.language.implicitConversions
 
-  def breakable[B](blk: => B): B = macro BreakableComprehensionMacros.xform
+  def breakable[B](blk: => B): B = macro BCMacros.xform
 
   // represents breaking a labled generator
   def break(label: Symbol): Unit = ???
 
   class BreakableGenerator[A](val gen: TraversableOnce[A]) extends AnyVal {
-    def breakable(label: Symbol): BreakableComprehensionMacros.BreakableIterator[A] = ???
+    def breakable(label: Symbol): BCMacros.BreakableIterator[A] = ???
   }
   implicit def toBreakableGenerator[A](gen: TraversableOnce[A]) = new BreakableGenerator(gen)
 
