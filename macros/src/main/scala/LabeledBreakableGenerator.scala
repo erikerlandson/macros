@@ -1,6 +1,19 @@
 import scala.language.experimental.macros
 import scala.reflect.macros.blackbox.Context
 
+object BreakableComprehensionMacros {
+  // An iterator that can be halted via its 'break' method.  Not invoked directly
+  class BreakableIterator[+A](itr: Iterator[A]) extends Iterator[A] {
+    private var broken = false
+    def break { broken = true }
+
+    def hasNext = !broken && itr.hasNext
+    def next = itr.next
+  }
+
+  class Throwable extends scala.util.control.ControlThrowable
+}
+
 class BreakableComprehensionMacros(val c: Context) {
   import c.universe._
 
@@ -131,9 +144,9 @@ class BreakableComprehensionMacros(val c: Context) {
             }"""
           }
           val r = q"""{
-            class $brkType extends scala.util.control.ControlThrowable
+            class $brkType extends BreakableComprehensionMacros.Throwable
             object $ctObj extends $brkType
-            val $brkVar = new breakablecomprehension.BreakableIterator($ge.toIterator)
+            val $brkVar = new BreakableComprehensionMacros.BreakableIterator($ge.toIterator)
             $opExpr
           }"""
           r
@@ -161,25 +174,22 @@ class BreakableComprehensionMacros(val c: Context) {
     if (!valid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val mapx = xformMap.transform(blk)
     val r = xformBreak.transform(c.untypecheck(mapx))
-//    check(r)
+    //check(r)
     r
   }
 }
+
 
 object breakablecomprehension {
   import scala.language.implicitConversions
 
   def breakable[B](blk: => B): B = macro BreakableComprehensionMacros.xform
 
-  // Semantically, represents a breakable generator inside a 'breakable' block
-  // Stub that can't be invoked directly, must be processed via macro
-  //def breakable[A](t1: TraversableOnce[A], label: Symbol): BreakableIterator[A] = ???
-
   // represents breaking a labled generator
   def break(label: Symbol): Unit = ???
 
   class BreakableGenerator[A](val gen: TraversableOnce[A]) extends AnyVal {
-    def breakable(label: Symbol): BreakableIterator[A] = ???
+    def breakable(label: Symbol): BreakableComprehensionMacros.BreakableIterator[A] = ???
   }
   implicit def toBreakableGenerator[A](gen: TraversableOnce[A]) = new BreakableGenerator(gen)
 
@@ -189,16 +199,5 @@ object breakablecomprehension {
     // This is a stub that cannot be invoked directly outside a macro call
     def break(label: Symbol): Boolean = ???
   }
-
-  // implicit conversion of boolean values to breakable guard condition mediary
   implicit def toBreakingGuard(cond: Boolean) = new BreakingGuard(cond)
-
-  // An iterator that can be halted via its 'break' method.  Not invoked directly
-  class BreakableIterator[+A](itr: Iterator[A]) extends Iterator[A] {
-    private var broken = false
-    def break { broken = true }
-
-    def hasNext = !broken && itr.hasNext
-    def next = itr.next
-  }
 }
