@@ -12,9 +12,44 @@ object BCMacros {
 
   class BCThrowable extends scala.util.control.ControlThrowable
 
-  class EitherIterator[+A](itr: Iterator[A]) extends Iterator[Either[BCThrowable, A]] {
+  type EitherIterator[A] = Iterator[Either[BCThrowable, A]]
+
+  class GeneratorEI[A](itr: Iterator[A]) extends EitherIterator[A] {
     def hasNext = itr.hasNext
     def next = Right(itr.next)
+  }
+
+  class FilteredEI[A](iter: EitherIterator[A], p: A => Boolean) extends EitherIterator[A] {
+    def nxt(i: EitherIterator[A]) = {
+      i.dropWhile { e => if (e.isLeft) false else !p(e.right.get) }
+    }
+    var itr = nxt(iter)
+    def hasNext = itr.hasNext
+    def next = {
+      var q = itr.next
+      itr = if (q.isRight) nxt(itr) else Iterator.empty
+      q
+    }
+  }
+
+  class BreakingEI[A](itr: EitherIterator[A], p: A => Boolean, t: BCThrowable)
+      extends EitherIterator[A] {
+    var unbroken = true
+    def hasNext = itr.hasNext && unbroken
+    def next = {
+      val q = itr.next
+      if (q.isRight) {
+        if (p(q.right.get)) {
+          unbroken = false
+          Left(t)
+        } else {
+          q
+        }
+      } else {
+        unbroken = false
+        q
+      }
+    }
   }
 }
 
