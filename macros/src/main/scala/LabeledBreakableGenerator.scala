@@ -12,44 +12,99 @@ object BCMacros {
 
   class BCThrowable extends scala.util.control.ControlThrowable
 
-  type EitherIterator[A] = Iterator[Either[BCThrowable, A]]
+  type EB[+A] = Either[BCThrowable, A]
 
-  class GeneratorEI[A](itr: Iterator[A]) extends EitherIterator[A] {
-    def hasNext = itr.hasNext
-    def next = Right(itr.next)
-  }
-
-  class FilteredEI[A](iter: EitherIterator[A], p: A => Boolean) extends EitherIterator[A] {
-    def nxt(i: EitherIterator[A]) = {
-      i.dropWhile { e => if (e.isLeft) false else !p(e.right.get) }
-    }
-    var itr = nxt(iter)
-    def hasNext = itr.hasNext
-    def next = {
-      var q = itr.next
-      itr = if (q.isRight) nxt(itr) else Iterator.empty
-      q
-    }
-  }
-
-  class BreakingEI[A](itr: EitherIterator[A], p: A => Boolean, t: BCThrowable)
-      extends EitherIterator[A] {
-    var unbroken = true
-    def hasNext = itr.hasNext && unbroken
-    def next = {
-      val q = itr.next
-      if (q.isRight) {
-        if (p(q.right.get)) {
-          unbroken = false
-          Left(t)
-        } else {
-          q
+  abstract class EitherIterator[A, BCT <: BCThrowable](bct: BCT) extends Iterator[EB[A]] { self =>
+    def mapEI[B](f: A => B): EitherIterator[B, BCT] = new EitherIterator[B, BCT](bct) {
+      val itr = self
+      var nxtVal: Option[EB[B]] = nxtM
+      def nxtM: Option[EB[B]] = {
+        if (!itr.hasNext) None
+        else {
+          val q = itr.next
+          if (q.isLeft) {
+            if (q.left.get == bct) None else Some(Left(q.left.get))
+          } else {
+            try {
+              Some(Right(f(q.right.get)))
+            } catch {
+              case ct if (ct == bct) => None
+              case ct: BCThrowable => Some(Left(ct))
+            }
+          }
         }
-      } else {
-        unbroken = false
+      }
+      def hasNext = !nxtVal.isEmpty
+      def next = {
+        val r = nxtVal.get
+        nxtVal = if (r.isLeft) None else nxtM
+        r
+      }
+    }
+
+    def flatMapEI[B](f: EB[A] => Iterator[EB[B]]):
+      EitherIterator[B, BCT] = new EitherIterator[B, BCT](bct) {
+        val itr = self
+        var itrFM: Iterator[EB[B]] = if (itr.hasNext) f(itr.next) else Iterator.empty
+        var nxtVal: Option[EB[B]] = nxtFM
+        def nxtFM = {
+          if (!itrFM.hasNext) None
+          else {
+            val q = itrFM.next
+            if (q.isRight) Some(q)
+            else if (q.left.get == bct) None
+            else Some(q)
+          }
+        }
+        def hasNext = !nxtVal.isEmpty
+        def next = {
+          val r = nxtVal.get
+          if (r.isLeft) { nxtVal = None } else {
+            if (!itrFM.hasNext) { itrFM = if (itr.hasNext) f(itr.next) else Iterator.empty }
+            nxtVal = nxtFM
+          }
+          r
+        }
+      }
+
+    def withFilterEI(p: A => Boolean) = new EitherIterator[A, BCT](bct) {
+      def nxt(i: Iterator[EB[A]]) = {
+        i.dropWhile { e => if (e.isLeft) false else !p(e.right.get) }
+      }
+      var itr: Iterator[EB[A]] = nxt(self)
+      def hasNext = itr.hasNext
+      def next = {
+        var q = itr.next
+        itr = if (q.isRight) nxt(itr) else Iterator.empty
         q
       }
     }
+
+    def withBreakingFilterEI(p: A => Boolean, t: BCThrowable) = new EitherIterator[A, BCT](bct) {
+      val itr = self
+      var broken = false
+      def hasNext = itr.hasNext && !broken
+      def next = {
+        val q = itr.next
+        if (q.isRight) {
+          if (p(q.right.get)) {
+            broken = true
+            Left(t)
+          } else {
+            q
+          }
+        } else {
+          broken = true
+          q
+        }
+      }
+    }
+  }
+
+  class GeneratorEI[A, BCT <: BCThrowable](itr: Iterator[A], bct: BCT)
+      extends EitherIterator[A, BCT](bct) {
+    def hasNext = itr.hasNext
+    def next = Right(itr.next)
   }
 }
 
@@ -210,6 +265,7 @@ class BCMacros(val c: Context) {
   }
 
   def xform(blk: c.Tree): c.Tree = {
+    check(blk)
     if (!valid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val mapx = xformMap.transform(blk)
     val r = xformBreak.transform(c.untypecheck(mapx))
