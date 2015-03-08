@@ -18,7 +18,7 @@ object BCMacros {
     def mapEI[B](f: A => B): EitherIterator[B, BCT] = new EitherIterator[B, BCT](bct) {
       val itr = self
       var nxtVal: Option[EB[B]] = nxtM
-      def nxtM: Option[EB[B]] = {
+      def nxtM = {
         if (!itr.hasNext) None
         else {
           val q = itr.next
@@ -59,9 +59,9 @@ object BCMacros {
         def hasNext = !nxtVal.isEmpty
         def next = {
           val r = nxtVal.get
-          if (r.isLeft) { nxtVal = None } else {
+          nxtVal = if (r.isLeft) None else {
             if (!itrFM.hasNext) { itrFM = if (itr.hasNext) f(itr.next) else Iterator.empty }
-            nxtVal = nxtFM
+            nxtFM
           }
           r
         }
