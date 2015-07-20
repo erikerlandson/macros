@@ -2,7 +2,7 @@ import scala.language.experimental.macros
 import scala.reflect.macros.blackbox.Context
 
 object BCMacros {
-  class BreakableIterator[+A](itr: Iterator[A]) extends Iterator[A] {
+  class LBGIterator[+A](itr: Iterator[A]) extends Iterator[A] {
     private var broken = false
     def break { broken = true }
 
@@ -14,8 +14,8 @@ object BCMacros {
 
   type EB[+A] = Either[BCThrowable, A]
 
-  abstract class EitherIterator[A, BCT <: BCThrowable](bct: BCT) extends Iterator[EB[A]] { self =>
-    def mapEI[B](f: A => B): EitherIterator[B, BCT] = new EitherIterator[B, BCT](bct) {
+  abstract class BreakableIterator[A, BCT <: BCThrowable](bct: BCT) extends Iterator[EB[A]] { self =>
+    final def mapBI[B](f: A => B) = new BreakableIterator[B, BCT](bct) {
       val itr = self
       var nxtVal: Option[EB[B]] = nxtM
       def nxtM = {
@@ -42,32 +42,31 @@ object BCMacros {
       }
     }
 
-    def flatMapEI[B](f: EB[A] => Iterator[EB[B]]):
-      EitherIterator[B, BCT] = new EitherIterator[B, BCT](bct) {
-        val itr = self
-        var itrFM: Iterator[EB[B]] = if (itr.hasNext) f(itr.next) else Iterator.empty
-        var nxtVal: Option[EB[B]] = nxtFM
-        def nxtFM = {
-          if (!itrFM.hasNext) None
-          else {
-            val q = itrFM.next
-            if (q.isRight) Some(q)
-            else if (q.left.get == bct) None
-            else Some(q)
-          }
-        }
-        def hasNext = !nxtVal.isEmpty
-        def next = {
-          val r = nxtVal.get
-          nxtVal = if (r.isLeft) None else {
-            if (!itrFM.hasNext) { itrFM = if (itr.hasNext) f(itr.next) else Iterator.empty }
-            nxtFM
-          }
-          r
+    final def flatMapBI[B](f: EB[A] => Iterator[EB[B]]) = new BreakableIterator[B, BCT](bct) {
+      val itr = self
+      var itrFM: Iterator[EB[B]] = if (itr.hasNext) f(itr.next) else Iterator.empty
+      var nxtVal: Option[EB[B]] = nxtFM
+      def nxtFM = {
+        if (!itrFM.hasNext) None
+        else {
+          val q = itrFM.next
+          if (q.isRight) Some(q)
+          else if (q.left.get == bct) None
+          else Some(q)
         }
       }
+      def hasNext = !nxtVal.isEmpty
+      def next = {
+        val r = nxtVal.get
+        nxtVal = if (r.isLeft) None else {
+          if (!itrFM.hasNext) { itrFM = if (itr.hasNext) f(itr.next) else Iterator.empty }
+          nxtFM
+        }
+        r
+      }
+    }
 
-    def withFilterEI(p: A => Boolean) = new EitherIterator[A, BCT](bct) {
+    def withFilterBI(p: A => Boolean) = new BreakableIterator[A, BCT](bct) {
       def nxt(i: Iterator[EB[A]]) = {
         i.dropWhile { e => if (e.isLeft) false else !p(e.right.get) }
       }
@@ -80,7 +79,7 @@ object BCMacros {
       }
     }
 
-    def withBreakingFilterEI(p: A => Boolean, t: BCThrowable) = new EitherIterator[A, BCT](bct) {
+    def withBreakingFilterBI(p: A => Boolean, t: BCThrowable) = new BreakableIterator[A, BCT](bct) {
       val itr = self
       var broken = false
       def hasNext = itr.hasNext && !broken
@@ -101,23 +100,25 @@ object BCMacros {
     }
   }
 
-  class GeneratorEI[A, BCT <: BCThrowable](itr: Iterator[A], bct: BCT)
-      extends EitherIterator[A, BCT](bct) {
-    def hasNext = itr.hasNext
-    def next = Right(itr.next)
-  }
+  def generatorBI[A, BCT <: BCThrowable](itr: Iterator[A], bct: BCT) =
+    new BreakableIterator[A, BCT](bct) {
+      def hasNext = itr.hasNext
+      def next = Right(itr.next)
+    }
 }
 
 class BCMacros(val c: Context) {
   import c.universe._
 
   private def check(expr: c.Tree): Unit = {
-    println(s"CODE= ${showCode(expr)}")
+    println("======== check ========")
     try {
       println(s"TYPE= ${c.typecheck(expr).tpe.toString}")
     } catch {
       case _: Exception => println("TYPE= <NONE>")
     }
+    println(s"CODE= ${showCode(expr)}")
+    println("=======================")
   }
 
   private def termString(t: TermName) = t match { case TermName(n) => n }
@@ -143,6 +144,7 @@ class BCMacros(val c: Context) {
           q"{ throw $ctObj }"
         }
 
+/*
         case q"""$sub.withFilter(
           $a => breakablecomprehension.toBreakingGuard($p).break($labSym))""" => {
           val subx = this.transform(sub)
@@ -153,6 +155,7 @@ class BCMacros(val c: Context) {
             !r
           })"""
         }
+*/
 
         case _ => super.transform(expr)
       }
@@ -160,42 +163,56 @@ class BCMacros(val c: Context) {
   }
 
   private object xformMap extends Transformer {
-    private def label(expr: c.Tree): Option[(String, c.Tree)] = {
+    private def label(expr: c.Tree): (String, c.Tree) = {
       expr match {
-        case q"breakablecomprehension.toBreakableGenerator[$_]($ge).breakable($labTree)" =>
-          Some((symbolStr(labTree), ge))
         case q"$sub.withFilter($_)" => label(sub)
-        case _ => None
+        case q"breakablecomprehension.toBreakableGenerator[$_]($ge).breakable($labTree)" =>
+          (symbolStr(labTree), ge)
+        case q"$ge" => (c.freshName("nonMatching$"), ge)
       }
     }
 
     private def lbg(expr: c.Tree, bgLab: String): c.Tree = {
-      val brkVar = lbgBG(bgLab)
       expr match {
-        case q"breakablecomprehension.toBreakableGenerator[$_]($_).breakable($_)" => q"$brkVar"
-
-        case q"""$sub.withFilter(
-            $a => breakablecomprehension.toBreakingGuard($p).break($labSym))""" 
-            if (bgLab == symbolStr(labSym)) => {
+        case q"$sub.withFilter($a => breakablecomprehension.toBreakingGuard($p).break($labSym))" => {
           val subx = lbg(sub, bgLab)
-          q"""$subx.withFilter($a => {
-            val r = $p
-            if (r) $brkVar.break
-            !r
-          })"""
+          val bct = lbgObj(symbolStr(labSym))
+          q"$subx.withBreakingFilterBI($a => { ! $p }, $bct)"
         }
 
         case q"$sub.withFilter($f)" => {
           val subx = lbg(sub, bgLab)
-          q"$subx.withFilter($f)"
+          q"$subx.withFilterBI($f)"
         }
 
-        case _ => throw new Exception("lbg: NO PATTERN MATCHED")
+        case _ => {
+          val brkVar = lbgBG(bgLab)
+          q"$brkVar"
+        }
       }
     }
 
     override def transform(expr: c.Tree) = {
       expr match {
+        case q"$sub.map[..$_]($g)($bf)" => this.transform(q"$sub.map($g)")
+
+        case q"$sub.map($g)" => {
+          val (labStr, ge) = label(sub)
+          val brkType = lbgCT(labStr)
+          val brkVar = lbgBG(labStr)
+          val ctObj = lbgObj(labStr)
+          val gx = xformBreak.transform(this.transform(g))
+          val subx = lbg(sub, labStr)
+          val r = q"""{
+            class $brkType extends BCMacros.BCThrowable
+            object $ctObj extends $brkType
+            val $brkVar = BCMacros.generatorBI($ge.toIterator, $ctObj)
+            $subx.mapBI($gx)
+          }"""
+          check(r)
+          r
+        }
+/*
         case q"$sub.$op[$_]($g)" if (isMonadicOp(op) && !label(sub).isEmpty) => {
           val (labStr, ge) = label(sub).get
           val brkType = lbgCT(labStr)
@@ -240,17 +257,21 @@ class BCMacros(val c: Context) {
           val r = q"""{
             class $brkType extends BCMacros.BCThrowable
             object $ctObj extends $brkType
-            val $brkVar = new BCMacros.BreakableIterator($ge.toIterator)
+            val $brkVar = new BCMacros.LBGIterator($ge.toIterator)
             $opExpr
           }"""
           r
-//          val q = xformBreak.transform(c.untypecheck(r))
-//          println("**********************")
-//          check(q)
-//          println("**********************")
-//          q
         }
+*/
+        case _ => super.transform(expr)
+      }
+    }
+  }
 
+  object xformStrip extends Transformer {
+    override def transform(expr: c.Tree) = {
+      expr match {
+        case q"$sub.mapBI($g)" => q"$sub.mapBI($g).map(_.right.get)"
         case _ => super.transform(expr)
       }
     }
@@ -259,7 +280,8 @@ class BCMacros(val c: Context) {
   private def valid(blk: c.Tree): Boolean = {
     // a single 'for' comprehension is valid: either a single 'map' or 'foreach' call
     blk match {
-      case q"$_.$op[$_]($_)" if (isMonadicOp(op)) => true
+      case q"$_.map[..$_]($_)" => true
+      case q"$_.map[..$_]($_)(..$_)" => true
       case _ => false
     }
   }
@@ -268,7 +290,7 @@ class BCMacros(val c: Context) {
     check(blk)
     if (!valid(blk)) throw new Exception("Invalid breakable block: "+showCode(blk))
     val mapx = xformMap.transform(blk)
-    val r = xformBreak.transform(c.untypecheck(mapx))
+    val r = xformStrip.transform(xformBreak.transform(c.untypecheck(mapx)))
     //check(r)
     r
   }
@@ -278,13 +300,13 @@ class BCMacros(val c: Context) {
 object breakablecomprehension {
   import scala.language.implicitConversions
 
-  def breakable[B](blk: => B): B = macro BCMacros.xform
+  def breakable[B](blk: => Traversable[B]): TraversableOnce[B] = macro BCMacros.xform
 
   // represents breaking a labled generator
   def break(label: Symbol): Unit = ???
 
   class BreakableGenerator[A](val gen: TraversableOnce[A]) extends AnyVal {
-    def breakable(label: Symbol): BCMacros.BreakableIterator[A] = ???
+    def breakable(label: Symbol): BCMacros.LBGIterator[A] = ???
   }
   implicit def toBreakableGenerator[A](gen: TraversableOnce[A]) = new BreakableGenerator(gen)
 

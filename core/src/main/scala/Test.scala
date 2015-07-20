@@ -45,29 +45,18 @@ object Demo extends App {
   import breakablecomprehension._
   import TypeString._
 
-  val o: Option[Int] = Some(5)
+  val o: Option[String] = Some("a") 
+
+/*
   val r1 = for {
     k <- o;
-    j <- Some(0 until k)
+    j <- Some(0 until 5)
   } yield {
     j
   }
   println(s"r1= $r1   type= ${typeString(r1)}")
-
+*/
   
-  val r2 = breakable {
-  for {
-    j <- 0 until 5 breakable 'outer;
-    k <- o
-  } yield {
-    (j,k)
-  }
-  }.toList
-  println(s"r2= $r2   type= ${typeString(r2)}")
-
-  val x = 3
-  val y = 1
-  val z = 4
 
 /*
   // breakable('inner) here works as expected
@@ -85,24 +74,37 @@ object Demo extends App {
     }
   }
 */
-
-// breakable('inner) here causes a runtime crash
 /*
+// breakable('inner) here causes a runtime crash
+  val x = 5
+  val y = 3
+  val z = 7
   // current framework throws away recent map and flatmap results
   println("using yield")
   val r1 = breakable {
     for {
       j <- 1 to 10 breakable('loop);
-      if (j > z) break('loop);
       if (j != y);
-      k <- 1 to j breakable('inner)
+      if (j == x) break('loop)
     } yield {
-      if (k == x) break('loop)
-      println(s"${(j,k)}")
-      (j, k)
+      if (j > z) break('loop)
+      j
     }
   }
   println(s"""yield result:\n${r1.toList.mkString("\n")}""")
 */
-
+  val x = 5
+  val y = 3
+  val z = 7
+  // current framework throws away recent map and flatmap results
+  println("using yield")
+  val r1 = breakable {
+    for {
+      j <- 1 to 10;
+      if (j != y)
+    } yield {
+      j
+    }
+  }
+  println(s"""yield result:\n${r1.toList.mkString("\n")}""")
 }
